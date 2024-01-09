@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # encoding: utf-8
+
+# Load packages
 from tqdm import tqdm
 import time, sys, logging, os, json, mimetypes, math, argparse, aiohttp, aiofiles, asyncio
 import re,hashlib,tempfile,shutil,signal,random
@@ -14,9 +16,10 @@ from pymantaray import MantarayIndex,Entry,MantarayIndexHTMLGenerator
 from typing import List
 from aiohttp import web
 
-
+# Define version
 __version__ = '0.0.5.r3'
 
+# Initiate variables 
 yes = {'yes','y', 'ye', ''}
 no = {'no','n'}
 address=""
@@ -26,7 +29,7 @@ all_errors=[]
 failed_downloads = []
 all_ok=""
 
-##prometheus
+### Prometheus section ###
 # Create a metric to track time spent and requests made.
 def pgw_auth_handler(url, method, timeout, headers, data):
     username = 'datafund'
@@ -154,7 +157,10 @@ SWARMSYNC_DL_SIZE_HISTOGRAM = Histogram(
     ),
     registry=registry,
 )
+### END Prometheus section ###
 
+### Define functions ###
+# Interupt operation 
 def signal_handler(sig, frame):
     # This function will be called when Ctrl+C is pressed
     print("Ctrl+C pressed. Cleaning up or running specific code...")
@@ -163,14 +169,17 @@ def signal_handler(sig, frame):
         push_to_gateway(args.stats, job='swarmsync', registry=registry, handler=pgw_auth_handler)
     sys.exit(0)  # Exit the script gracefully
 
+# Append to list
 def append_list(file, a_list):
     with open(file, "a") as fp:
         json.dump(a_list, fp)
 
+# Write list to disk
 def write_list(file, a_list):
     with open(file, "w") as fp:
         json.dump(a_list, fp)
 
+# Write dictionary to disk
 def write_dict(file, a_dict):
     with open(file, "w") as f:
         f.write(str(a_dict))
@@ -184,11 +193,13 @@ def read_dict(file):
     except OSError:
         return None
 
+# Convert to JSON ?
 class Object:
     def toJSON(self):
         return json.dump(self, default=lambda o: o.__dict__,
             sort_keys=True, indent=4)
 
+# Make dictionary ?
 class q_dict(dict):
     def __str__(self):
         return json.dumps(self, ensure_ascii=False)
@@ -196,6 +207,7 @@ class q_dict(dict):
     def __repr__(self):
         return json.dumps(self, ensure_ascii=False)
 
+# Define paths to files used for recording status
 def init_paths(local):
     global home, ALLFILES, TODO, ADDRESS, TAG, RESPONSES, RETRIEVABLE, RETRY, MANTARAY, INDEX, FAILED_DL
     if local != True:
@@ -220,6 +232,7 @@ def init_paths(local):
     if not RESPONSES.is_file():
         write_dict(RESPONSES, '[]')
 
+# Prepare list of all files and TODO for uploads
 def prepare():
   global pin,stamp
   global home,ALLFILES,TODO,FAILED_DL,ADDRESS,TAG,RESPONSES,RETRIEVABLE,RETRY
@@ -235,7 +248,7 @@ def prepare():
   if Path(ALLFILES).is_file():
     oldList = read_dict(ALLFILES)
     if jsonList != oldList:
-      print('New files list differs from the old..')
+      print('New files list differs from the old.')
       choice = input('Do you want to overwrite list and todo ? [Y]es/[n]o:').lower()
       if choice in yes:
         write_list(ALLFILES, jsonList)
@@ -250,6 +263,7 @@ def prepare():
   else:
     write_list(TODO, jsonList)
 
+# Return file size suffix
 def convert_size(size_bytes):
    if size_bytes == 0:
        return "0B"
@@ -259,6 +273,7 @@ def convert_size(size_bytes):
    s = round(size_bytes / p, 2)
    return "%s %s" % (s, size_name[i])
 
+# FileManager ?
 class FileManager():
     def __init__(self, file_name: str):
         self.name = file_name
@@ -290,6 +305,7 @@ class FileManager():
                 self.sha256.update(chunk)
             self.pbar.close()
 
+# Print size of uploaded data
 def get_size():
     get = read_dict(RESPONSES)
     calc=[]
@@ -298,6 +314,7 @@ def get_size():
     total = sum(calc)
     print('Total size of uploaded data: ', convert_size(total))
 
+# Cleanup and append to dictionary ?
 def response_dict(file, a_dict):
   o_dict = read_dict(file)
   for i in range(len(o_dict)):
@@ -305,6 +322,7 @@ def response_dict(file, a_dict):
   o_dict.append(q_dict(a_dict))
   write_dict(file, str(o_dict))
 
+# Create tag ?
 async def create_tag():
     global address
     params = json.dumps({ "address": address })
@@ -325,6 +343,7 @@ async def create_tag():
         # handle error(s) according to your needs
         print(e)
 
+# ?
 async def aioget(ref, url: str, session: aiohttp.ClientSession, sem):
     global display
     resp_dict = []
@@ -353,7 +372,7 @@ async def aioget(ref, url: str, session: aiohttp.ClientSession, sem):
         display.update()
         sem.release()
 
-
+# Download file
 async def aiodownload(ref, file: str, url: str, session: aiohttp.ClientSession, sem, sha256, chunk_timeout=300, max_retries=32, retry_delay=1):
     global display
     temp_file = None
@@ -448,7 +467,7 @@ async def aiodownload(ref, file: str, url: str, session: aiohttp.ClientSession, 
             push_to_gateway(args.stats, job='swarmsync', registry=registry, handler=pgw_auth_handler)
         write_list(FAILED_DL, failed_downloads)
 
-
+# Upload file
 async def aioupload(file: FileManager, url: str, session: aiohttp.ClientSession, sem):
     global scheduled,todo,tag
     await sem.acquire()
@@ -520,6 +539,7 @@ async def aioupload(file: FileManager, url: str, session: aiohttp.ClientSession,
             push_to_gateway(args.stats, job='swarmsync', registry=registry, handler=pgw_auth_handler)
         sem.release()
 
+# ?
 async def directupload(file: FileManager, url: str, session: aiohttp.ClientSession):
     global tag
     res=None
@@ -551,6 +571,7 @@ async def directupload(file: FileManager, url: str, session: aiohttp.ClientSessi
     finally:
         return res
 
+# ?
 async def async_check(scheduled, url: str):
     global display,args
     sem = asyncio.Semaphore(args.count)
@@ -561,6 +582,7 @@ async def async_check(scheduled, url: str):
     cleanup(RETRIEVABLE)
     return res
 
+# ?
 async def async_upload(scheduled, urll):
     global args
     l_url = list(islice(cycle(urll), len(scheduled)))
@@ -571,6 +593,7 @@ async def async_upload(scheduled, urll):
         res = await asyncio.gather(*[aioupload(file, url, session, sem) for file, url in zip(scheduled, l_url)])
     print(f'\nitems uploaded ({len(res)})')
 
+# ?
 async def oneupload(scheduled: List[Path], urll):
     global args
     l_url = list(islice(cycle(urll), len(scheduled)))
@@ -578,6 +601,7 @@ async def oneupload(scheduled: List[Path], urll):
         res = await asyncio.gather(*[directupload(FileManager(str(file)), url, session) for file, url in zip(scheduled, l_url)])
         return res
 
+# ?
 async def async_download(references, paths, urll, sha256l):
     global display,args
     l_url = list(islice(cycle(urll), len(references)))
@@ -606,7 +630,7 @@ async def async_download(references, paths, urll, sha256l):
     status_filtered = list(filter(lambda v: re.match('20.', v), status))
     print(f'OK ({len(status_filtered)})')
 
-
+# Convert list to dict
 def lst_to_dict(lst):
     res_dct = {}
     length=len(lst)
@@ -615,6 +639,7 @@ def lst_to_dict(lst):
         res_dct[jsd]=jsd
     return res_dct
 
+# Calculate SHA256
 def calculate_sha256(file_path):
     sha256_hash = hashlib.sha256()
     
@@ -624,6 +649,7 @@ def calculate_sha256(file_path):
     
     return sha256_hash.hexdigest()
 
+# Cleanup responses file ?
 def clean_responses(file):
     data = read_dict(file)
     for i in range(len(data)):
@@ -634,6 +660,7 @@ def clean_responses(file):
       clean=''.join(clean.rstrip(')'))
       write_dict(file, str(clean))
 
+# ?
 def cleanup(file):
     # Sanitize responses if there was a failure
     clean = read_dict(file)
@@ -656,11 +683,13 @@ def cleanup(file):
     
     clean_responses(file)
 
+# ?
 def normalize_url(base: str, path: str):
     url = os.path.join(base, '')
     url = url + path
     return url
 
+# ?
 async def check_tag(url: str, u_tag: str):
     if not u_tag:
         if Path(TAG).is_file():
@@ -677,6 +706,7 @@ async def check_tag(url: str, u_tag: str):
             else:
                 print('Error in getting tag')
 
+# ?
 async def get_tag(url: str, addr: str):
     if Path(TAG).is_file():
         u_tag = read_dict(TAG)
@@ -687,6 +717,7 @@ async def get_tag(url: str, addr: str):
         tag = await create_tag()
     return tag
 
+# ?
 async def create_mantaray_index(json_file_path: str, index_file_path: str) -> bool:
     # Load the JSON data from the file
     async with aiofiles.open(json_file_path, 'r') as f:
@@ -731,6 +762,7 @@ async def create_mantaray_index(json_file_path: str, index_file_path: str) -> bo
 
     return True
 
+# ?
 def cleanup_prometheus():
     REQUEST_TIME.clear()
     REQUEST_SIZE.clear()
@@ -743,6 +775,7 @@ def cleanup_prometheus():
     if args.stats:
         push_to_gateway(args.stats, job='swarmsync', registry=registry, handler=pgw_auth_handler)
 
+# Main function
 def main_common():
     global scheduled, todo, urll
     cleanup(RESPONSES)
@@ -762,12 +795,14 @@ def main_common():
     loop.close()
     cleanup(RESPONSES)
     get_size()
-    print('Time spent uploding:', time.strftime("%H:%M:%S", time.gmtime(end-start)))
+    print('Time spent uploading:', time.strftime("%H:%M:%S", time.gmtime(end-start)))
     cleanup_prometheus()
 
+# ?
 def main():
     main_common()
 
+# ?
 def process_common_args():
     global tag, address
     if args.path:
@@ -793,6 +828,7 @@ def process_common_args():
     if args.beeurl:
         handle_beeurl(args, args.command.__name__)
 
+# ?
 def handle_beeurl(args, command):
     global urll
     endpoints = {
@@ -808,6 +844,7 @@ def handle_beeurl(args, command):
         urll.append(normalize_url(l, uri))
     print("url: ", urll)
 
+# ?
 def handle_tag():
     global tag, address
     if Path(ADDRESS).is_file() and not address:
@@ -824,12 +861,13 @@ def handle_tag():
         if not args.no_tag:
             tag = asyncio.run(get_tag(args.beeurl, address))
 
-
+# ?
 def upload():
     process_common_args()
     prepare()
     main()
 
+# ?
 def show(args):
     if 'todo' in args.s:
       get = read_dict(TODO)
@@ -848,6 +886,7 @@ def show(args):
         asyncio.run(check_tag(normalize_url(args.beeurl, 'tags/'), args.tag))
         quit()
 
+# ?
 def check(args):
     global url,display
     if args.count:
@@ -886,6 +925,7 @@ def check(args):
     if retry != []:
         write_list(RETRY, retry)
 
+# ?
 def download(args):
     global display
     if args.count:
@@ -929,6 +969,7 @@ def download(args):
     print('Time spent downloading:', time.strftime("%H:%M:%S", time.gmtime(end-start)))
     cleanup_prometheus()
 
+# ?
 def mantaray(args):
     global display
     loop = asyncio.new_event_loop()
@@ -975,8 +1016,6 @@ def add_common_arguments(subparser):
     subparser.add_argument('--xbee-header', action='store_true', help='add xbee header to the file')
     subparser.add_argument('--stats', type=str, help='send prometheus statistics to url', default='')
 
-
-
 # Version argument
 parser.add_argument('-v', '--version', action='version',
                     version='%(prog)s {version}'.format(version=__version__))
@@ -989,7 +1028,6 @@ parser_show.add_argument("-s", "--saved-tag", action=argparse.BooleanOptionalAct
 parser_show.add_argument("-t", "--tag", type=str, required=False, help="enter tag uid to fetch info about", default="")
 add_common_arguments(parser_show)
 parser_show.set_defaults(func=lambda parsed_args: show(parsed_args), command=show)
-
 
 # Download subparser
 parser_download = subparsers.add_parser('download', help='download everything from responses list')
